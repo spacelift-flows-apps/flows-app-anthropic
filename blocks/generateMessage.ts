@@ -50,7 +50,8 @@ export const generateMessage: AppBlock = {
         },
         schema: {
           name: "Schema",
-          description: "The JSON schema to generate the object from.",
+          description:
+            "Schema used to constrain the output of the model to follow a specific schema, ensuring valid, parseable output for downstream processing.",
           type: {
             type: "object",
             additionalProperties: true,
