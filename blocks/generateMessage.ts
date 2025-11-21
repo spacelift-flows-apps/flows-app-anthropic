@@ -109,7 +109,7 @@ export const generateMessage: AppBlock = {
               required: ["name", "description", "schema"],
             },
           },
-          required: true,
+          required: false,
         },
         mcpServers: {
           name: "Remote MCP servers",
