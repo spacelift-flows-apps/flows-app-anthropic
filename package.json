@@ -1,15 +1,14 @@
 {
   "type": "module",
   "dependencies": {
-    "@slflows/sdk": "^0.0.8",
-    "typescript": "^5.8.3",
-    "@anthropic-ai/sdk": "^0.57.0",
+    "@anthropic-ai/sdk": "^0.69.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "jsonschema": "^1.5.0"
+    "@slflows/sdk": "^0.5.1",
+    "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "@types/node": "^24.0.7",
-    "@useflows/flowctl": "^0.1.1",
+    "@types/node": "^24.10.1",
+    "@useflows/flowctl": "^0.4.0",
     "prettier": "^3.6.2",
     "ts-node": "^10.9.2"
   },
