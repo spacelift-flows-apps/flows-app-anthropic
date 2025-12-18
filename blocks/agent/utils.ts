@@ -8,6 +8,7 @@ interface ToolDefinition {
 }
 
 interface CallState {
+  eventIds: string[];
   messages: Anthropic.Beta.Messages.BetaMessageParam[];
   toolCallIds: string[];
   pendingId: string;
@@ -22,6 +23,7 @@ interface CallState {
   thinking: boolean | undefined;
   thinkingBudget: number | undefined;
   temperature: number | undefined;
+  originalEventId: string;
 }
 
 function joinToolNames(
@@ -114,7 +116,7 @@ function streamMessage(params: {
           },
         }
       : undefined,
-    betas: ["mcp-client-2025-04-04", "structured-outputs-2025-11-13"],
+    betas: ["structured-outputs-2025-11-13"],
   });
 }
 
@@ -205,35 +207,12 @@ async function syncPendingEventWithStream(
   pendingId: string,
   stream: ReturnType<typeof streamMessage>,
 ) {
-  let lastTool: { name: string; serverName: string; id: string } | undefined;
-
   for await (const event of stream) {
     if (event.type !== "content_block_start") {
       continue;
     }
 
     switch (event.content_block.type) {
-      case "mcp_tool_use": {
-        await events.updatePending(pendingId, {
-          statusDescription: `Calling "${event.content_block.name}" on "${event.content_block.server_name}"`,
-        });
-
-        lastTool = {
-          name: event.content_block.name,
-          serverName: event.content_block.server_name,
-          id: event.content_block.id,
-        };
-        break;
-      }
-      case "mcp_tool_result": {
-        if (lastTool && lastTool.id === event.content_block.tool_use_id) {
-          await events.updatePending(pendingId, {
-            statusDescription: `Received result of "${lastTool.name}" from "${lastTool.serverName}"`,
-          });
-        }
-
-        break;
-      }
       case "text": {
         await events.updatePending(pendingId, {
           statusDescription: "Processing...",
@@ -252,27 +231,35 @@ async function syncPendingEventWithStream(
   }
 }
 
-async function emitResult(
-  pendingId: string,
+async function emitResult(params: {
+  pendingId: string;
   result: {
     output: unknown;
     usage: {
       inputTokens: number;
       outputTokens: number;
     };
-  },
-  eventIds: string[],
-): Promise<void> {
+  };
+  originalEventId: string;
+  eventIds: string[];
+}): Promise<void> {
+  // Parent is the most recent tool result, or the original input if no tools were called
+  const parentEventId =
+    params.eventIds.length > 0 ? params.eventIds[0] : params.originalEventId;
+
+  // Other tool results as secondary parents (E0 is already an ancestor, don't include it)
+  const secondaryParentEventIds =
+    params.eventIds.length > 1 ? params.eventIds.slice(1) : undefined;
+
   await events.emit(
     {
-      output: result.output,
-      usage: result.usage,
+      output: params.result.output,
+      usage: params.result.usage,
     },
     {
-      complete: pendingId,
-      parentEventId: eventIds.length > 0 ? eventIds[0] : undefined,
-      secondaryParentEventIds:
-        eventIds.length > 1 ? eventIds.slice(1) : undefined,
+      complete: params.pendingId,
+      parentEventId,
+      secondaryParentEventIds,
     },
   );
 }
@@ -280,6 +267,7 @@ async function emitResult(
 async function storeCallState(params: {
   executionId: string;
   eventIds: string[];
+  originalEventId: string;
   pendingId: string;
   messages: Anthropic.Beta.Messages.BetaMessageParam[];
   toolCalls: Anthropic.Beta.Messages.BetaToolUseBlock[];
@@ -310,14 +298,10 @@ async function storeCallState(params: {
 export async function loadCallState(executionId: string) {
   const { value } = await kv.block.get(`call-${executionId}`);
 
-  if (!value) {
-    throw new Error("Call state not found");
-  }
-
-  return value as CallState;
+  return value as CallState | undefined;
 }
 
-async function deleteCallState(executionId: string) {
+export async function deleteCallState(executionId: string) {
   await kv.block.delete([`call-${executionId}`]);
 }
 
@@ -334,7 +318,8 @@ export async function storeToolResult(params: {
     key: `result-${executionId}-${turn}-${toolCallId}`,
     value: {
       toolCallId,
-      result,
+      result:
+        typeof result === "string" ? result : JSON.stringify(result ?? null),
       eventId,
     },
     ttl: 60 * 5,
@@ -371,17 +356,19 @@ export async function loadToolResults(params: {
   };
 }
 
-export async function setTimeoutTimer(executionId: string) {
+export async function setTimeoutTimer(executionId: string, turn: number) {
   const id = await timers.block.set(60 * 2, {
     description: "Waiting for tool results",
     inputPayload: {
       executionId,
+      turn,
     },
   });
 
   await kv.block.set({
     key: `timer-${executionId}`,
     value: id,
+    ttl: 60 * 5,
   });
 }
 
@@ -390,6 +377,7 @@ export async function clearTimeoutTimer(executionId: string) {
 
   if (value) {
     await timers.block.unset(value);
+    await kv.block.delete([`timer-${executionId}`]);
   }
 }
 
@@ -412,6 +400,7 @@ export async function continueTurn(params: {
   thinking: boolean | undefined;
   thinkingBudget: number | undefined;
   temperature: number | undefined;
+  originalEventId: string;
 }): Promise<void> {
   const {
     executionId,
@@ -432,6 +421,7 @@ export async function continueTurn(params: {
     thinking,
     thinkingBudget,
     temperature,
+    originalEventId,
   } = params;
 
   await events.updatePending(pendingId, {
@@ -479,12 +469,14 @@ export async function continueTurn(params: {
     thinking,
     thinkingBudget,
     temperature,
+    originalEventId,
   });
 }
 
 async function handleModelResponse(params: {
   message: Anthropic.Beta.Messages.BetaMessage;
   pendingId: string;
+  originalEventId: string;
   eventIds: string[];
   executionId: string;
   previousMessages: Anthropic.Beta.Messages.BetaMessageParam[];
@@ -503,6 +495,7 @@ async function handleModelResponse(params: {
   const {
     message,
     pendingId,
+    originalEventId,
     eventIds,
     executionId,
     previousMessages,
@@ -540,9 +533,9 @@ async function handleModelResponse(params: {
     }
 
     try {
-      return emitResult(
+      return emitResult({
         pendingId,
-        {
+        result: {
           output,
           usage: {
             inputTokens: message.usage.input_tokens,
@@ -550,7 +543,8 @@ async function handleModelResponse(params: {
           },
         },
         eventIds,
-      );
+        originalEventId,
+      });
     } finally {
       await deleteCallState(executionId);
     }
@@ -570,6 +564,7 @@ async function handleModelResponse(params: {
           : `Calling tools: ${toolCallNames}`,
     });
 
+    // Tool result IDs are secondary parents for visual lineage only.
     await Promise.all(
       toolCalls.map((toolCall) =>
         events.emit(
@@ -581,13 +576,14 @@ async function handleModelResponse(params: {
           {
             outputKey: toolOutputKeys[toolCall.name],
             echo: true,
-            parentEventId: eventIds.length > 0 ? eventIds[0] : undefined,
-            secondaryParentEventIds:
-              eventIds.length > 1 ? eventIds.slice(1) : undefined,
+            parentEventId: originalEventId,
+            secondaryParentEventIds: eventIds.length > 0 ? eventIds : undefined,
           },
         ),
       ),
     );
+
+    const nextTurn = turn + 1;
 
     await storeCallState({
       executionId,
@@ -603,15 +599,16 @@ async function handleModelResponse(params: {
       model,
       maxTokens,
       systemPrompt,
-      turn: turn + 1,
+      turn: nextTurn,
       maxRetries,
       schema,
       thinking,
       thinkingBudget,
       temperature,
+      originalEventId,
     });
 
-    return setTimeoutTimer(executionId);
+    return setTimeoutTimer(executionId, nextTurn);
   }
 
   await events.cancelPending(pendingId, "Unexpected response from model");
@@ -621,6 +618,7 @@ async function handleModelResponse(params: {
 export async function executeTurn(params: {
   executionId: string;
   pendingId: string;
+  originalEventId: string;
   eventIds: string[];
   messages: Anthropic.Beta.Messages.BetaMessageParam[];
   toolDefinitions: ToolDefinition[];
@@ -639,6 +637,7 @@ export async function executeTurn(params: {
   const {
     executionId,
     pendingId,
+    originalEventId,
     eventIds,
     messages,
     toolDefinitions,
@@ -689,6 +688,7 @@ export async function executeTurn(params: {
       return handleModelResponse({
         message,
         pendingId,
+        originalEventId,
         eventIds,
         executionId,
         previousMessages: messages,
@@ -738,21 +738,27 @@ export async function executeTurn(params: {
   throw lastError || new Error("Unknown error");
 }
 
-export async function isTimerLocked(executionId: string): Promise<boolean> {
-  const { value } = await kv.block.get(`lock-${executionId}`);
-  return Boolean(value);
-}
-
-export async function setTimerLock(executionId: string): Promise<void> {
-  await kv.block.set({
-    key: `lock-${executionId}`,
-    value: true,
-    ttl: 60 * 5,
+export async function tryAcquireProcessingLock(
+  executionId: string,
+  turn: number,
+  lockId: string,
+): Promise<boolean> {
+  return kv.block.set({
+    key: `process-${executionId}-${turn}`,
+    value: { lockId },
+    lock: { id: lockId, timeout: 300 },
   });
 }
 
-export async function clearTimerLock(executionId: string): Promise<void> {
-  await kv.block.delete([`lock-${executionId}`]);
+export async function releaseProcessingLock(
+  executionId: string,
+  turn: number,
+  lockId: string,
+): Promise<void> {
+  await kv.block.releaseLock({
+    key: `process-${executionId}-${turn}`,
+    lockId,
+  });
 }
 
 export function getToolDefinitionOutputKey(name: string) {

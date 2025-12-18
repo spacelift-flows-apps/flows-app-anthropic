@@ -3,14 +3,14 @@ import { AppBlock, AppBlockComponentOutput, events } from "@slflows/sdk/v1";
 import {
   executeTurn,
   loadCallState,
+  deleteCallState,
   storeToolResult,
   loadToolResults,
   setTimeoutTimer,
   clearTimeoutTimer,
   continueTurn,
-  isTimerLocked,
-  setTimerLock,
-  clearTimerLock,
+  tryAcquireProcessingLock,
+  releaseProcessingLock,
   validateConfig,
   getToolDefinitionOutputKey,
 } from "./utils";
@@ -178,7 +178,7 @@ export const agent: AppBlock = {
         return executeTurn({
           executionId,
           pendingId,
-          eventIds: [input.event.id],
+          eventIds: [],
           messages: [
             {
               role: "user",
@@ -197,157 +197,168 @@ export const agent: AppBlock = {
           thinking,
           thinkingBudget,
           temperature,
+          originalEventId: input.event.id,
         });
       },
     },
-    toolResult: {
-      name: "Tool result",
+    toolResults: {
+      name: "Tool results",
       config: {
-        result: {
-          name: "Result",
-          description: "The result of the tool call",
-          type: "any",
+        results: {
+          name: "Results",
+          description:
+            "The results of the tool calls. Provide an array of results, one for each tool call.",
+          // @ts-expect-error TODO: add support for empty schemas
+          type: {
+            type: "array",
+            items: true,
+          },
           required: true,
         },
       },
       onEvent: async (input) => {
         if (!input.event.echo) {
-          throw new Error("This input should not be called directly");
+          throw new Error(
+            "This input should only receive echo events from tool outputs",
+          );
         }
 
         const { body } = input.event.echo;
         const executionId = body.executionId;
-        const { result } = input.event.inputConfig;
-        const eventId = input.event.id;
+        const state = await loadCallState(executionId);
 
-        if (await isTimerLocked(executionId)) {
+        if (!state) {
           return;
         }
 
-        const {
-          messages,
-          toolCallIds,
-          pendingId,
-          toolDefinitions,
-          force,
-          model,
-          turn,
-          maxTokens,
-          systemPrompt,
-          maxRetries,
-          schema,
-          thinking,
-          thinkingBudget,
-          temperature,
-        } = await loadCallState(executionId);
+        const { results } = input.event.inputConfig;
 
-        // Clear the timeout in case we get all results and can either continue or complete.
-        await clearTimeoutTimer(executionId);
+        const result = Array.isArray(results)
+          ? results.find((result) => result !== null)
+          : results;
 
-        // Store the results separately to avoid race conditions.
+        // Store result first to ensure it's never lost even if we fail to acquire the lock
         await storeToolResult({
           executionId,
           toolCallId: body.toolCallId,
-          result: typeof result === "string" ? result : JSON.stringify(result),
-          turn,
-          eventId,
+          result,
+          turn: state.turn,
+          eventId: input.event.id,
         });
 
-        // Load the results to check if we have all of them.
-        const { haveAllResults, toolResults, eventIds } = await loadToolResults(
-          {
-            executionId,
-            turn,
-            toolCallIds,
-          },
+        const lockId = randomUUID();
+        const acquired = await tryAcquireProcessingLock(
+          executionId,
+          state.turn,
+          lockId,
         );
 
-        if (!haveAllResults) {
-          // If we don't have all results yet, we set a timeout to check again in 2 minutes.
-          // This is to avoid waiting forever or race conditions.
-          return setTimeoutTimer(executionId);
+        if (!acquired) {
+          return;
         }
 
-        return continueTurn({
-          executionId,
-          eventIds,
-          pendingId,
-          messages,
-          toolCallIds,
-          toolDefinitions,
-          toolResults,
-          force,
-          model,
-          maxTokens,
-          systemPrompt,
-          turn,
-          maxRetries,
-          schema,
-          thinking,
-          thinkingBudget,
-          temperature,
-          apiKey: input.app.config.anthropicApiKey,
-        });
+        try {
+          await clearTimeoutTimer(executionId);
+
+          const { haveAllResults, toolResults, eventIds } =
+            await loadToolResults({
+              executionId,
+              turn: state.turn,
+              toolCallIds: state.toolCallIds,
+            });
+
+          if (!haveAllResults) {
+            await setTimeoutTimer(executionId, state.turn);
+            return;
+          }
+
+          await continueTurn({
+            executionId,
+            eventIds,
+            pendingId: state.pendingId,
+            messages: state.messages,
+            toolCallIds: state.toolCallIds,
+            toolDefinitions: state.toolDefinitions,
+            toolResults,
+            force: state.force,
+            model: state.model,
+            maxTokens: state.maxTokens,
+            systemPrompt: state.systemPrompt,
+            turn: state.turn,
+            maxRetries: state.maxRetries,
+            schema: state.schema,
+            thinking: state.thinking,
+            thinkingBudget: state.thinkingBudget,
+            temperature: state.temperature,
+            apiKey: input.app.config.anthropicApiKey,
+            originalEventId: state.originalEventId,
+          });
+        } finally {
+          await releaseProcessingLock(executionId, state.turn, lockId);
+        }
       },
     },
   },
 
   onTimer: async (input) => {
-    const { executionId } = input.timer.payload;
+    const { executionId, turn: timerTurn } = input.timer.payload;
 
-    await setTimerLock(executionId);
+    const state = await loadCallState(executionId);
+
+    if (!state || state.turn !== timerTurn) {
+      return;
+    }
+
+    const lockId = randomUUID();
+    const acquired = await tryAcquireProcessingLock(
+      executionId,
+      state.turn,
+      lockId,
+    );
+
+    if (!acquired) {
+      return;
+    }
 
     try {
-      const {
-        messages,
-        toolCallIds,
-        pendingId,
-        toolDefinitions,
-        force,
-        model,
-        turn,
-        maxTokens,
-        systemPrompt,
-        maxRetries,
-        schema,
-        thinking,
-        thinkingBudget,
-        temperature,
-      } = await loadCallState(executionId);
-
       const { haveAllResults, toolResults, eventIds } = await loadToolResults({
         executionId,
-        turn,
-        toolCallIds,
+        turn: state.turn,
+        toolCallIds: state.toolCallIds,
       });
 
       if (!haveAllResults) {
-        // Still waiting – cancel pending event and exit.
-        return events.cancelPending(pendingId, "Timeout");
+        await events.cancelPending(
+          state.pendingId,
+          "Timeout waiting for tool results",
+        );
+        await deleteCallState(executionId);
+        return;
       }
 
       await continueTurn({
         executionId,
         eventIds,
-        pendingId,
-        messages,
-        toolCallIds,
-        toolDefinitions,
+        pendingId: state.pendingId,
+        messages: state.messages,
+        toolCallIds: state.toolCallIds,
+        toolDefinitions: state.toolDefinitions,
         toolResults,
-        force,
-        model,
-        maxTokens,
-        systemPrompt,
-        turn,
-        maxRetries,
-        schema,
-        thinking,
-        thinkingBudget,
-        temperature,
+        force: state.force,
+        model: state.model,
+        maxTokens: state.maxTokens,
+        systemPrompt: state.systemPrompt,
+        turn: state.turn,
+        maxRetries: state.maxRetries,
+        schema: state.schema,
+        thinking: state.thinking,
+        thinkingBudget: state.thinkingBudget,
+        temperature: state.temperature,
         apiKey: input.app.config.anthropicApiKey,
+        originalEventId: state.originalEventId,
       });
     } finally {
-      await clearTimerLock(executionId);
+      await releaseProcessingLock(executionId, state.turn, lockId);
     }
   },
 
@@ -401,7 +412,7 @@ export const agent: AppBlock = {
           },
           required: ["parameters"],
         },
-        possiblePrimaryParents: ["toolResult"],
+        possiblePrimaryParents: ["toolResults"],
         order: order++,
         secondary: true,
       };
