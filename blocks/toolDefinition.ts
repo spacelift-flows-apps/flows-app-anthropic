@@ -11,13 +11,7 @@ export const toolDefinition: AppBlock = {
       name: "Schema",
       description: "JSON schema defining the parameters this tool accepts",
       type: {
-        type: "object",
-        properties: {
-          type: { type: "string" },
-          properties: { type: "object", additionalProperties: true },
-          required: { type: "array", items: { type: "string" } },
-        },
-        additionalProperties: true,
+        type: "jsonSchemaObject",
       },
       default: {
         type: "object",
