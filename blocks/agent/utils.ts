@@ -8,6 +8,7 @@ interface ToolDefinition {
 }
 
 interface CallState {
+  blockId: string;
   eventIds: string[];
   messages: Anthropic.Beta.Messages.BetaMessageParam[];
   toolCallIds: string[];
@@ -24,6 +25,28 @@ interface CallState {
   thinkingBudget: number | undefined;
   temperature: number | undefined;
   originalEventId: string;
+}
+
+export function createInvocationId(
+  blockId: string,
+  executionId: string,
+  toolCallId: string,
+) {
+  return `${blockId}::${executionId}::${toolCallId}`;
+}
+
+export function parseInvocationId(invocationId: string) {
+  const parts = invocationId.split("::");
+
+  if (parts.length !== 3) {
+    throw new Error(`Invalid invocation ID: ${invocationId}`);
+  }
+
+  return {
+    blockId: parts[0],
+    executionId: parts[1],
+    toolCallId: parts[2],
+  };
 }
 
 function joinToolNames(
@@ -266,6 +289,7 @@ async function emitResult(params: {
 
 async function storeCallState(params: {
   executionId: string;
+  blockId: string;
   eventIds: string[];
   originalEventId: string;
   pendingId: string;
@@ -383,6 +407,7 @@ export async function clearTimeoutTimer(executionId: string) {
 
 export async function continueTurn(params: {
   executionId: string;
+  blockId: string;
   eventIds: string[];
   pendingId: string;
   messages: Anthropic.Beta.Messages.BetaMessageParam[];
@@ -404,6 +429,7 @@ export async function continueTurn(params: {
 }): Promise<void> {
   const {
     executionId,
+    blockId,
     eventIds,
     pendingId,
     messages,
@@ -454,6 +480,7 @@ export async function continueTurn(params: {
 
   return executeTurn({
     executionId,
+    blockId,
     pendingId,
     eventIds,
     messages: nextMessages,
@@ -479,6 +506,7 @@ async function handleModelResponse(params: {
   originalEventId: string;
   eventIds: string[];
   executionId: string;
+  blockId: string;
   previousMessages: Anthropic.Beta.Messages.BetaMessageParam[];
   toolDefinitions: ToolDefinition[];
   force: boolean | string;
@@ -498,6 +526,7 @@ async function handleModelResponse(params: {
     originalEventId,
     eventIds,
     executionId,
+    blockId,
     previousMessages,
     toolDefinitions,
     force,
@@ -513,6 +542,7 @@ async function handleModelResponse(params: {
   } = params;
 
   const { toolNames, toolOutputKeys } = processToolDefinitions(toolDefinitions);
+
   if (message.stop_reason === "end_turn") {
     const textPart = message.content.findLast(
       (content) => content.type === "text",
@@ -564,18 +594,15 @@ async function handleModelResponse(params: {
           : `Calling tools: ${toolCallNames}`,
     });
 
-    // Tool result IDs are secondary parents for visual lineage only.
     await Promise.all(
       toolCalls.map((toolCall) =>
         events.emit(
           {
             parameters: toolCall.input,
-            toolCallId: toolCall.id,
-            executionId,
+            invocationId: createInvocationId(blockId, executionId, toolCall.id),
           },
           {
             outputKey: toolOutputKeys[toolCall.name],
-            echo: true,
             parentEventId: originalEventId,
             secondaryParentEventIds: eventIds.length > 0 ? eventIds : undefined,
           },
@@ -587,6 +614,7 @@ async function handleModelResponse(params: {
 
     await storeCallState({
       executionId,
+      blockId,
       eventIds,
       messages: previousMessages.concat({
         role: message.role,
@@ -617,6 +645,7 @@ async function handleModelResponse(params: {
 
 export async function executeTurn(params: {
   executionId: string;
+  blockId: string;
   pendingId: string;
   originalEventId: string;
   eventIds: string[];
@@ -636,6 +665,7 @@ export async function executeTurn(params: {
 }): Promise<void> {
   const {
     executionId,
+    blockId,
     pendingId,
     originalEventId,
     eventIds,
@@ -691,6 +721,7 @@ export async function executeTurn(params: {
         originalEventId,
         eventIds,
         executionId,
+        blockId,
         previousMessages: messages,
         toolDefinitions,
         force,

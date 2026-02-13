@@ -20,6 +20,7 @@ export const agent: AppBlock = {
   name: "Agent",
   category: "Core",
   description: "An agent that can call tools and generate structured output.",
+  autoconfirm: true,
   config: {
     model: {
       name: "Model",
@@ -177,6 +178,7 @@ export const agent: AppBlock = {
 
         return executeTurn({
           executionId,
+          blockId: input.block.id,
           pendingId,
           eventIds: [],
           messages: [
@@ -201,103 +203,74 @@ export const agent: AppBlock = {
         });
       },
     },
-    toolResults: {
-      name: "Tool results",
-      config: {
-        results: {
-          name: "Results",
-          description:
-            "The results of the tool calls. Provide an array of results, one for each tool call.",
-          // @ts-expect-error TODO: add support for empty schemas
-          type: {
-            type: "array",
-            items: true,
-          },
-          required: true,
-        },
-      },
-      onEvent: async (input) => {
-        if (!input.event.echo) {
-          throw new Error(
-            "This input should only receive echo events from tool outputs",
-          );
-        }
+  },
 
-        const { body } = input.event.echo;
-        const executionId = body.executionId;
-        const state = await loadCallState(executionId);
+  onInternalMessage: async (input) => {
+    const { executionId, toolCallId, result, eventId } = input.message.body;
+    const state = await loadCallState(executionId);
 
-        if (!state) {
-          return;
-        }
+    if (!state) {
+      return;
+    }
 
-        const { results } = input.event.inputConfig;
+    await storeToolResult({
+      executionId,
+      toolCallId,
+      result,
+      turn: state.turn,
+      eventId,
+    });
 
-        const result = Array.isArray(results)
-          ? results.find((result) => result !== null)
-          : results;
+    const lockId = randomUUID();
+    const acquired = await tryAcquireProcessingLock(
+      executionId,
+      state.turn,
+      lockId,
+    );
 
-        // Store result first to ensure it's never lost even if we fail to acquire the lock
-        await storeToolResult({
-          executionId,
-          toolCallId: body.toolCallId,
-          result,
-          turn: state.turn,
-          eventId: input.event.id,
-        });
+    if (!acquired) {
+      return;
+    }
 
-        const lockId = randomUUID();
-        const acquired = await tryAcquireProcessingLock(
-          executionId,
-          state.turn,
-          lockId,
-        );
+    try {
+      await clearTimeoutTimer(executionId);
 
-        if (!acquired) {
-          return;
-        }
+      const { haveAllResults, toolResults, eventIds } = await loadToolResults({
+        executionId,
+        turn: state.turn,
+        toolCallIds: state.toolCallIds,
+      });
 
-        try {
-          await clearTimeoutTimer(executionId);
+      if (!haveAllResults) {
+        await setTimeoutTimer(executionId, state.turn);
+        return;
+      }
 
-          const { haveAllResults, toolResults, eventIds } =
-            await loadToolResults({
-              executionId,
-              turn: state.turn,
-              toolCallIds: state.toolCallIds,
-            });
-
-          if (!haveAllResults) {
-            await setTimeoutTimer(executionId, state.turn);
-            return;
-          }
-
-          await continueTurn({
-            executionId,
-            eventIds,
-            pendingId: state.pendingId,
-            messages: state.messages,
-            toolCallIds: state.toolCallIds,
-            toolDefinitions: state.toolDefinitions,
-            toolResults,
-            force: state.force,
-            model: state.model,
-            maxTokens: state.maxTokens,
-            systemPrompt: state.systemPrompt,
-            turn: state.turn,
-            maxRetries: state.maxRetries,
-            schema: state.schema,
-            thinking: state.thinking,
-            thinkingBudget: state.thinkingBudget,
-            temperature: state.temperature,
-            apiKey: input.app.config.anthropicApiKey,
-            originalEventId: state.originalEventId,
-          });
-        } finally {
-          await releaseProcessingLock(executionId, state.turn, lockId);
-        }
-      },
-    },
+      await continueTurn({
+        executionId,
+        blockId: state.blockId,
+        eventIds,
+        pendingId: state.pendingId,
+        messages: state.messages,
+        toolCallIds: state.toolCallIds,
+        toolDefinitions: state.toolDefinitions,
+        toolResults,
+        force: state.force,
+        model: state.model,
+        maxTokens: state.maxTokens,
+        systemPrompt: state.systemPrompt,
+        turn: state.turn,
+        maxRetries: state.maxRetries,
+        schema: state.schema,
+        thinking: state.thinking,
+        thinkingBudget: state.thinkingBudget,
+        temperature: state.temperature,
+        apiKey: input.app.config.anthropicApiKey,
+        originalEventId: state.originalEventId,
+      });
+    } finally {
+      await releaseProcessingLock(executionId, state.turn, lockId);
+    }
   },
 
   onTimer: async (input) => {
@@ -338,6 +311,7 @@ export const agent: AppBlock = {
 
       await continueTurn({
         executionId,
+        blockId: state.blockId,
         eventIds,
         pendingId: state.pendingId,
         messages: state.messages,
@@ -409,10 +383,11 @@ export const agent: AppBlock = {
           type: "object",
           properties: {
             parameters: toolDefinition.schema,
+            invocationId: { type: "string" },
           },
-          required: ["parameters"],
+          required: ["parameters", "invocationId"],
         },
-        possiblePrimaryParents: ["toolResults"],
+        possiblePrimaryParents: ["default"],
         order: order++,
         secondary: true,
       };
