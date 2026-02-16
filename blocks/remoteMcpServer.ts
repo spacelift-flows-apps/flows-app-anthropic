@@ -35,18 +35,16 @@ export const remoteMcpServer: AppBlock = {
   onSync: async (input) => {
     const config = input.block.config;
 
-    const { Client } = await import(
-      "@modelcontextprotocol/sdk/client/index.js"
-    );
+    const { Client } =
+      await import("@modelcontextprotocol/sdk/client/index.js");
 
     try {
       const baseUrl = new URL(config.url);
       let client: typeof Client.prototype | undefined = undefined;
 
       try {
-        const { StreamableHTTPClientTransport } = await import(
-          "@modelcontextprotocol/sdk/client/streamableHttp.js"
-        );
+        const { StreamableHTTPClientTransport } =
+          await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
 
         client = new Client({
           name: "streamable-http-client",
@@ -55,9 +53,8 @@ export const remoteMcpServer: AppBlock = {
 
         await client.connect(new StreamableHTTPClientTransport(baseUrl));
       } catch {
-        const { SSEClientTransport } = await import(
-          "@modelcontextprotocol/sdk/client/sse.js"
-        );
+        const { SSEClientTransport } =
+          await import("@modelcontextprotocol/sdk/client/sse.js");
 
         client = new Client({
           name: "sse-client",

@@ -4,6 +4,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { generateMessage } from "./blocks/generateMessage";
 import { toolDefinition } from "./blocks/toolDefinition";
 import { remoteMcpServer } from "./blocks/remoteMcpServer";
+import { agent } from "./blocks/agent";
+import { agentToolResult } from "./blocks/agentToolResult";
 
 export const app = defineApp({
   name: "Anthropic AI",
@@ -26,6 +28,8 @@ export const app = defineApp({
     },
   },
   blocks: {
+    agent,
+    agentToolResult,
     generateMessage,
     toolDefinition,
     remoteMcpServer,
