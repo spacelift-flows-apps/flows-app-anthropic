@@ -324,7 +324,13 @@ export async function generateObject(
       const stream = streamMessage({
         maxTokens,
         model,
-        messages: messagesWithoutThinking,
+        messages: [
+          ...messagesWithoutThinking,
+          {
+            role: "user",
+            content: "Internal: Use the json tool to respond.",
+          },
+        ],
         tools: [
           {
             name: "json",
