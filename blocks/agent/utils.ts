@@ -1,5 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { events, kv, timers } from "@slflows/sdk/v1";
+import {
+  AnthropicAuth,
+  createClient,
+  defaultModelFor,
+  resolveAuth,
+} from "../client";
 
 interface ToolDefinition {
   name: string;
@@ -68,7 +74,7 @@ function joinToolNames(
 }
 
 function streamMessage(params: {
-  apiKey: string;
+  auth: AnthropicAuth;
   model: string;
   maxTokens: number;
   temperature?: number | undefined;
@@ -81,7 +87,7 @@ function streamMessage(params: {
   schema?: Anthropic.Messages.Tool.InputSchema | undefined;
 }) {
   const {
-    apiKey,
+    auth,
     maxTokens,
     temperature,
     systemPrompt,
@@ -94,9 +100,7 @@ function streamMessage(params: {
     thinkingBudget,
   } = params;
 
-  const client = new Anthropic({
-    apiKey,
-  });
+  const client = createClient(auth);
 
   const shouldCallSpecificTool = tools.length > 0 && typeof force === "string";
   const shouldCallAnyTool = tools.length > 0 && force === true;
@@ -148,15 +152,10 @@ export function validateConfig(
   staticConfig: Record<string, any>,
   inputConfig: Record<string, any>,
 ) {
-  if (!appConfig.anthropicApiKey) {
-    throw new Error("Anthropic API key is required");
-  }
+  const auth = resolveAuth(appConfig);
 
-  const model = staticConfig.model ?? appConfig.defaultModel;
-
-  if (!model) {
-    throw new Error("Model is required");
-  }
+  const model =
+    staticConfig.model ?? appConfig.defaultModel ?? defaultModelFor(auth);
 
   if (
     inputConfig.thinking?.enabled &&
@@ -170,7 +169,7 @@ export function validateConfig(
 
   return {
     model,
-    apiKey: appConfig.anthropicApiKey as string,
+    auth,
     toolDefinitions: (staticConfig.toolDefinitions ?? []) as ToolDefinition[],
     prompt: inputConfig.prompt as string,
     maxTokens: inputConfig.maxTokens as number,
@@ -421,7 +420,7 @@ export async function continueTurn(params: {
   turn: number;
   maxRetries: number;
   schema: Anthropic.Messages.Tool.InputSchema | undefined;
-  apiKey: string;
+  auth: AnthropicAuth;
   thinking: boolean | undefined;
   thinkingBudget: number | undefined;
   temperature: number | undefined;
@@ -443,7 +442,7 @@ export async function continueTurn(params: {
     turn,
     maxRetries,
     schema,
-    apiKey,
+    auth,
     thinking,
     thinkingBudget,
     temperature,
@@ -490,7 +489,7 @@ export async function continueTurn(params: {
     maxTokens,
     systemPrompt,
     turn,
-    apiKey,
+    auth,
     maxRetries,
     schema,
     thinking,
@@ -656,7 +655,7 @@ export async function executeTurn(params: {
   maxTokens: number;
   systemPrompt: string | undefined;
   turn: number;
-  apiKey: string;
+  auth: AnthropicAuth;
   maxRetries: number;
   schema: Anthropic.Messages.Tool.InputSchema | undefined;
   thinking: boolean | undefined;
@@ -676,7 +675,7 @@ export async function executeTurn(params: {
     maxTokens,
     systemPrompt,
     turn,
-    apiKey,
+    auth,
     maxRetries,
     schema,
     thinking,
@@ -704,7 +703,7 @@ export async function executeTurn(params: {
         messages,
         tools,
         force,
-        apiKey,
+        auth,
         thinking,
         thinkingBudget,
         temperature,

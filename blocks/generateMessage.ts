@@ -13,6 +13,7 @@ import {
   setTimerLock,
   clearTimerLock,
 } from "./utils";
+import { resolveAuth } from "./client";
 
 export const generateMessage: AppBlock = {
   name: "Generate message",
@@ -181,7 +182,7 @@ export const generateMessage: AppBlock = {
           force,
           thinking,
           thinkingBudget,
-          apiKey,
+          auth,
           schema,
           maxRetries,
           temperature,
@@ -208,7 +209,7 @@ export const generateMessage: AppBlock = {
           mcpServers,
           systemPrompt,
           turn: 0,
-          apiKey,
+          auth,
           maxRetries,
           schema,
           thinking,
@@ -303,7 +304,7 @@ export const generateMessage: AppBlock = {
       thinking,
       thinkingBudget,
       temperature,
-      apiKey: input.app.config.anthropicApiKey,
+      auth: resolveAuth(input.app.config),
       blockId: input.block.id,
     });
 
@@ -377,7 +378,7 @@ export const generateMessage: AppBlock = {
       thinking,
       thinkingBudget,
       temperature,
-      apiKey: input.app.config.anthropicApiKey,
+      auth: resolveAuth(input.app.config),
       blockId: input.block.id,
     });
   },

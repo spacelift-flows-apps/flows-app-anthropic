@@ -5,6 +5,7 @@ Otherwise, it may be obtained here: https://github.com/spacelift-flows-apps/agen
 Always load this skill before doing anything with a Flows app, as it provides guidance, documentation, and tools for development. If it's not installed, do not proceed with Flows app development until it is installed and loaded.
 
 The plugin can be installed by running
+
 ```
 # Add the marketplace (one-time)
 claude plugin marketplace add spacelift-flows-apps/agent-skills

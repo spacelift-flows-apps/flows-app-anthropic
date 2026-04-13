@@ -1,6 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { events, kv, timers, messaging } from "@slflows/sdk/v1";
 import { Schema, Validator } from "jsonschema";
+import {
+  AnthropicAuth,
+  createClient,
+  defaultModelFor,
+  resolveAuth,
+} from "./client";
 
 interface ToolDefinition {
   blockId: string;
@@ -55,7 +61,7 @@ export function joinToolNames(
 }
 
 export function streamMessage(params: {
-  apiKey: string;
+  auth: AnthropicAuth;
   model: string;
   maxTokens: number;
   temperature?: number | undefined;
@@ -68,7 +74,7 @@ export function streamMessage(params: {
   thinkingBudget?: number | undefined;
 }) {
   const {
-    apiKey,
+    auth,
     maxTokens,
     temperature,
     systemPrompt,
@@ -81,13 +87,11 @@ export function streamMessage(params: {
     thinkingBudget,
   } = params;
 
-  const client = new Anthropic({
-    apiKey,
-  });
-
   const shouldCallSpecificTool = tools.length > 0 && typeof force === "string";
   const shouldCallAnyTool = tools.length > 0 && force === true;
   const hasMCPServers = mcpServers && mcpServers.length > 0;
+
+  const client = createClient(auth);
 
   return client.beta.messages.stream({
     max_tokens: maxTokens,
@@ -136,7 +140,7 @@ export function streamMessage(params: {
                 disable_parallel_tool_use: hasMCPServers,
               }
         : undefined,
-    betas: ["mcp-client-2025-04-04"],
+    betas: auth.kind === "bedrock" ? undefined : ["mcp-client-2025-04-04"],
   });
 }
 
@@ -144,15 +148,10 @@ export function validateConfig(
   appConfig: Record<string, any>,
   inputConfig: Record<string, any>,
 ) {
-  if (!appConfig.anthropicApiKey) {
-    throw new Error("Anthropic API key is required");
-  }
+  const auth = resolveAuth(appConfig);
 
-  const model = inputConfig.model ?? appConfig.defaultModel;
-
-  if (!model) {
-    throw new Error("Model is required");
-  }
+  const model =
+    inputConfig.model ?? appConfig.defaultModel ?? defaultModelFor(auth);
 
   if (
     inputConfig.thinking &&
@@ -164,11 +163,19 @@ export function validateConfig(
     );
   }
 
+  const mcpServers = (inputConfig.mcpServers ?? []) as MCPServer[];
+
+  if (auth.kind === "bedrock" && mcpServers.length > 0) {
+    throw new Error(
+      "Remote MCP servers are not supported on the AWS Bedrock backend. Remove the MCP servers or switch to the Anthropic API.",
+    );
+  }
+
   return {
     model,
-    apiKey: appConfig.anthropicApiKey as string,
+    auth,
     toolDefinitions: (inputConfig.toolDefinitions ?? []) as ToolDefinition[],
-    mcpServers: (inputConfig.mcpServers ?? []) as MCPServer[],
+    mcpServers,
     prompt: inputConfig.prompt as string,
     maxTokens: inputConfig.maxTokens as number,
     systemPrompt: inputConfig.systemPrompt as string | undefined,
@@ -272,7 +279,7 @@ export async function syncPendingEventWithStream(
 export async function generateObject(
   finalText: string,
   params: {
-    apiKey: string;
+    auth: AnthropicAuth;
     model: string;
     maxTokens: number;
     messages: Anthropic.Beta.Messages.BetaMessageParam[];
@@ -285,7 +292,7 @@ export async function generateObject(
   },
 ): Promise<void> {
   const {
-    apiKey,
+    auth,
     model,
     maxTokens,
     messages,
@@ -340,7 +347,7 @@ export async function generateObject(
         ],
         mcpServers: [],
         force: "json",
-        apiKey,
+        auth,
       });
 
       const message = await stream.finalMessage();
@@ -554,7 +561,7 @@ export async function continueTurn(params: {
   turn: number;
   maxRetries: number;
   schema: Anthropic.Messages.Tool.InputSchema | undefined;
-  apiKey: string;
+  auth: AnthropicAuth;
   blockId: string;
   thinking: boolean | undefined;
   thinkingBudget: number | undefined;
@@ -575,7 +582,7 @@ export async function continueTurn(params: {
     turn,
     maxRetries,
     schema,
-    apiKey,
+    auth,
     blockId,
     thinking,
     thinkingBudget,
@@ -622,7 +629,7 @@ export async function continueTurn(params: {
     mcpServers,
     systemPrompt,
     turn,
-    apiKey,
+    auth,
     maxRetries,
     schema,
     thinking,
@@ -644,7 +651,7 @@ export async function handleModelResponse(params: {
   mcpServers: MCPServer[];
   systemPrompt: string | undefined;
   turn: number;
-  apiKey: string;
+  auth: AnthropicAuth;
   maxRetries: number;
   schema: Anthropic.Messages.Tool.InputSchema | undefined;
   thinking: boolean | undefined;
@@ -664,7 +671,7 @@ export async function handleModelResponse(params: {
     mcpServers,
     systemPrompt,
     turn,
-    apiKey,
+    auth,
     maxRetries,
     schema,
     thinking,
@@ -684,7 +691,7 @@ export async function handleModelResponse(params: {
 
     if (schema) {
       return generateObject(textPart.text, {
-        apiKey,
+        auth,
         model,
         maxTokens,
         messages: [
@@ -787,7 +794,7 @@ export async function executeTurn(params: {
   mcpServers: MCPServer[];
   systemPrompt: string | undefined;
   turn: number;
-  apiKey: string;
+  auth: AnthropicAuth;
   maxRetries: number;
   schema: Anthropic.Messages.Tool.InputSchema | undefined;
   thinking: boolean | undefined;
@@ -806,7 +813,7 @@ export async function executeTurn(params: {
     mcpServers,
     systemPrompt,
     turn,
-    apiKey,
+    auth,
     maxRetries,
     schema,
     thinking,
@@ -835,7 +842,7 @@ export async function executeTurn(params: {
         tools,
         mcpServers,
         force,
-        apiKey,
+        auth,
         thinking,
         thinkingBudget,
         temperature,
@@ -858,7 +865,7 @@ export async function executeTurn(params: {
         mcpServers,
         systemPrompt,
         turn,
-        apiKey,
+        auth,
         maxRetries,
         schema,
         thinking,

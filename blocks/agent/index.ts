@@ -14,6 +14,7 @@ import {
   validateConfig,
   getToolDefinitionOutputKey,
 } from "./utils";
+import { resolveAuth } from "../client";
 import { randomUUID } from "node:crypto";
 
 export const agent: AppBlock = {
@@ -160,7 +161,7 @@ export const agent: AppBlock = {
           force,
           thinking,
           thinkingBudget,
-          apiKey,
+          auth,
           schema,
           maxRetries,
           temperature,
@@ -193,7 +194,7 @@ export const agent: AppBlock = {
           maxTokens,
           systemPrompt,
           turn: 0,
-          apiKey,
+          auth,
           maxRetries,
           schema,
           thinking,
@@ -265,7 +266,7 @@ export const agent: AppBlock = {
         thinking: state.thinking,
         thinkingBudget: state.thinkingBudget,
         temperature: state.temperature,
-        apiKey: input.app.config.anthropicApiKey,
+        auth: resolveAuth(input.app.config),
         originalEventId: state.originalEventId,
       });
     } finally {
@@ -328,7 +329,7 @@ export const agent: AppBlock = {
         thinking: state.thinking,
         thinkingBudget: state.thinkingBudget,
         temperature: state.temperature,
-        apiKey: input.app.config.anthropicApiKey,
+        auth: resolveAuth(input.app.config),
         originalEventId: state.originalEventId,
       });
     } finally {
