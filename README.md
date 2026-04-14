@@ -4,9 +4,14 @@
 
 ## Config
 
-The config contains an Anthropic API key which is required to confirm the app installation and a default model to use for API calls.
+The app supports two authentication backends, auto-detected from which credentials you fill in:
 
-The confirmation result will be determined by sending a test message to the "Count Message tokens" endpoint and checking if the response is valid.
+- **Anthropic API** — set `Anthropic API Key`. Use standard Anthropic model IDs (e.g. `claude-sonnet-4-6`).
+- **AWS Bedrock** — set `AWS Access Key ID`, `AWS Secret Access Key`, `AWS Region` (and optionally `AWS Session Token` for temporary STS credentials). Use Bedrock cross-region inference profile IDs, e.g. `global.anthropic.claude-sonnet-4-6` (or a regional variant like `us.anthropic.claude-sonnet-4-6`).
+
+If both are provided, the Anthropic key takes precedence.
+
+For auto-refreshing short-lived AWS credentials, pair this app with the **AWS STS** app and reference its credential signals in the AWS fields, so you don't need to manage long-lived IAM keys.
 
 ## Blocks
 
