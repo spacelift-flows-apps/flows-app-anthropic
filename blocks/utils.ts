@@ -7,6 +7,10 @@ import {
   defaultModelFor,
   resolveAuth,
 } from "./client";
+import {
+  BUILTIN_BETAS_GENERATE_MESSAGE,
+  mergeBetas,
+} from "../anthropicOptions";
 
 interface ToolDefinition {
   blockId: string;
@@ -40,6 +44,7 @@ interface CallState {
   thinkingBudget: number | undefined;
   temperature: number | undefined;
   originalEventId: string;
+  betas: string[];
 }
 
 export function joinToolNames(
@@ -72,6 +77,7 @@ export function streamMessage(params: {
   force: boolean | string;
   thinking?: boolean | undefined;
   thinkingBudget?: number | undefined;
+  betas: string[];
 }) {
   const {
     auth,
@@ -85,6 +91,7 @@ export function streamMessage(params: {
     force,
     thinking,
     thinkingBudget,
+    betas,
   } = params;
 
   const shouldCallSpecificTool = tools.length > 0 && typeof force === "string";
@@ -140,7 +147,7 @@ export function streamMessage(params: {
                 disable_parallel_tool_use: hasMCPServers,
               }
         : undefined,
-    betas: auth.kind === "bedrock" ? undefined : ["mcp-client-2025-04-04"],
+    ...(betas.length > 0 ? { betas } : {}),
   });
 }
 
@@ -187,6 +194,11 @@ export function validateConfig(
       | undefined,
     maxRetries: (inputConfig.maxRetries ?? 1) as number,
     temperature: inputConfig.temperature as number | undefined,
+    betas: mergeBetas(
+      appConfig.extraBetas,
+      inputConfig.extraBetas,
+      auth.kind === "bedrock" ? [] : BUILTIN_BETAS_GENERATE_MESSAGE,
+    ),
   };
 }
 
@@ -289,6 +301,7 @@ export async function generateObject(
     inputTokens: number;
     outputTokens: number;
     parentEventId: string;
+    betas: string[];
   },
 ): Promise<void> {
   const {
@@ -300,6 +313,7 @@ export async function generateObject(
     maxRetries,
     pendingId,
     parentEventId,
+    betas,
   } = params;
 
   let retryCount = 0;
@@ -348,6 +362,7 @@ export async function generateObject(
         mcpServers: [],
         force: "json",
         auth,
+        betas,
       });
 
       const message = await stream.finalMessage();
@@ -449,6 +464,7 @@ export async function storeCallState(params: {
   thinkingBudget: number | undefined;
   temperature: number | undefined;
   originalEventId: string;
+  betas: string[];
 }) {
   const { eventId, toolCalls, ...rest } = params;
 
@@ -566,6 +582,7 @@ export async function continueTurn(params: {
   thinking: boolean | undefined;
   thinkingBudget: number | undefined;
   temperature: number | undefined;
+  betas: string[];
 }): Promise<void> {
   const {
     eventId,
@@ -587,6 +604,7 @@ export async function continueTurn(params: {
     thinking,
     thinkingBudget,
     temperature,
+    betas,
   } = params;
 
   await events.updatePending(pendingId, {
@@ -635,6 +653,7 @@ export async function continueTurn(params: {
     thinking,
     thinkingBudget,
     temperature,
+    betas,
   });
 }
 
@@ -657,6 +676,7 @@ export async function handleModelResponse(params: {
   thinking: boolean | undefined;
   thinkingBudget: number | undefined;
   temperature: number | undefined;
+  betas: string[];
 }): Promise<void> {
   const {
     message,
@@ -677,6 +697,7 @@ export async function handleModelResponse(params: {
     thinking,
     thinkingBudget,
     temperature,
+    betas,
   } = params;
 
   const { toolNames, toolBlockIds } = processToolDefinitions(toolDefinitions);
@@ -707,6 +728,7 @@ export async function handleModelResponse(params: {
         inputTokens: message.usage.input_tokens,
         outputTokens: message.usage.output_tokens,
         parentEventId: eventId,
+        betas,
       });
     }
 
@@ -773,6 +795,7 @@ export async function handleModelResponse(params: {
       thinkingBudget,
       temperature,
       originalEventId: eventId,
+      betas,
     });
 
     return setTimeoutTimer(eventId);
@@ -800,6 +823,7 @@ export async function executeTurn(params: {
   thinking: boolean | undefined;
   thinkingBudget: number | undefined;
   temperature: number | undefined;
+  betas: string[];
 }): Promise<void> {
   const {
     pendingId,
@@ -819,6 +843,7 @@ export async function executeTurn(params: {
     thinking,
     thinkingBudget,
     temperature,
+    betas,
   } = params;
 
   let retryCount = 0;
@@ -846,6 +871,7 @@ export async function executeTurn(params: {
         thinking,
         thinkingBudget,
         temperature,
+        betas,
       });
 
       await syncPendingEventWithStream(pendingId, stream);
@@ -871,6 +897,7 @@ export async function executeTurn(params: {
         thinking,
         thinkingBudget,
         temperature,
+        betas,
       });
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));

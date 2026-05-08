@@ -15,6 +15,7 @@ import {
   getToolDefinitionOutputKey,
 } from "./utils";
 import { resolveAuth } from "../client";
+import { EXTRA_BETAS_FIELD } from "../../anthropicOptions";
 import { randomUUID } from "node:crypto";
 
 export const agent: AppBlock = {
@@ -69,6 +70,7 @@ export const agent: AppBlock = {
       },
       required: false,
     },
+    extraBetas: EXTRA_BETAS_FIELD,
   },
   inputs: {
     default: {
@@ -165,6 +167,7 @@ export const agent: AppBlock = {
           schema,
           maxRetries,
           temperature,
+          betas,
         } = validateConfig(
           input.app.config,
           input.block.config,
@@ -201,6 +204,7 @@ export const agent: AppBlock = {
           thinkingBudget,
           temperature,
           originalEventId: input.event.id,
+          betas,
         });
       },
     },
@@ -268,6 +272,7 @@ export const agent: AppBlock = {
         temperature: state.temperature,
         auth: resolveAuth(input.app.config),
         originalEventId: state.originalEventId,
+        betas: state.betas,
       });
     } finally {
       await releaseProcessingLock(executionId, state.turn, lockId);
@@ -331,6 +336,7 @@ export const agent: AppBlock = {
         temperature: state.temperature,
         auth: resolveAuth(input.app.config),
         originalEventId: state.originalEventId,
+        betas: state.betas,
       });
     } finally {
       await releaseProcessingLock(executionId, state.turn, lockId);
