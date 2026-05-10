@@ -6,6 +6,7 @@ import { remoteMcpServer } from "./blocks/remoteMcpServer";
 import { agent } from "./blocks/agent";
 import { agentToolResult } from "./blocks/agentToolResult";
 import { createClient, defaultModelFor, resolveAuth } from "./blocks/client";
+import { httpRequest } from "./blocks/httpRequest";
 
 export const app = defineApp({
   name: "Anthropic AI",
@@ -76,6 +77,7 @@ export const app = defineApp({
     agent,
     agentToolResult,
     generateMessage,
+    httpRequest,
     toolDefinition,
     remoteMcpServer,
   },
