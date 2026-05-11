@@ -1,17 +1,17 @@
 {
   "type": "module",
   "dependencies": {
-    "@anthropic-ai/bedrock-sdk": "^0.28.1",
-    "@anthropic-ai/sdk": "^0.80.0",
+    "@anthropic-ai/bedrock-sdk": "^0.29.1",
+    "@anthropic-ai/sdk": "^0.95.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@slflows/sdk": "^0.12.0",
+    "@slflows/sdk": "^0.13.0",
     "jsonschema": "^1.5.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.3"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.6.2",
     "@useflows/flowctl": "^0.4.0",
-    "prettier": "^3.8.1",
+    "prettier": "^3.8.3",
     "ts-node": "^10.9.2"
   },
   "scripts": {

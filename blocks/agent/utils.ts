@@ -134,16 +134,17 @@ function streamMessage(params: {
                 type: "auto",
               }
         : undefined,
-    output_format: schema
+    output_config: schema
       ? {
-          type: "json_schema",
-          schema: {
-            ...schema,
-            additionalProperties: false,
+          format: {
+            type: "json_schema",
+            schema: {
+              ...schema,
+              additionalProperties: false,
+            },
           },
         }
       : undefined,
-    betas: ["structured-outputs-2025-11-13"],
   });
 }
 
