@@ -6,6 +6,7 @@ import {
   defaultModelFor,
   resolveAuth,
 } from "../client";
+import { BUILTIN_BETAS_AGENT, mergeBetas } from "../../anthropicOptions";
 
 interface ToolDefinition {
   name: string;
@@ -31,6 +32,7 @@ interface CallState {
   thinkingBudget: number | undefined;
   temperature: number | undefined;
   originalEventId: string;
+  betas: string[];
 }
 
 export function createInvocationId(
@@ -85,6 +87,7 @@ function streamMessage(params: {
   thinking?: boolean | undefined;
   thinkingBudget?: number | undefined;
   schema?: Anthropic.Messages.Tool.InputSchema | undefined;
+  betas: string[];
 }) {
   const {
     auth,
@@ -98,6 +101,7 @@ function streamMessage(params: {
     force,
     thinking,
     thinkingBudget,
+    betas,
   } = params;
 
   const client = createClient(auth);
@@ -145,6 +149,7 @@ function streamMessage(params: {
           },
         }
       : undefined,
+    ...(betas.length > 0 ? { betas } : {}),
   });
 }
 
@@ -183,6 +188,11 @@ export function validateConfig(
       | undefined,
     maxRetries: (inputConfig.maxRetries ?? 1) as number,
     temperature: inputConfig.temperature as number | undefined,
+    betas: mergeBetas(
+      appConfig.extraBetas,
+      staticConfig.extraBetas,
+      BUILTIN_BETAS_AGENT,
+    ),
   };
 }
 
@@ -306,6 +316,7 @@ async function storeCallState(params: {
   thinking: boolean | undefined;
   thinkingBudget: number | undefined;
   temperature: number | undefined;
+  betas: string[];
 }) {
   const { executionId, toolCalls, ...rest } = params;
 
@@ -426,6 +437,7 @@ export async function continueTurn(params: {
   thinkingBudget: number | undefined;
   temperature: number | undefined;
   originalEventId: string;
+  betas: string[];
 }): Promise<void> {
   const {
     executionId,
@@ -448,6 +460,7 @@ export async function continueTurn(params: {
     thinkingBudget,
     temperature,
     originalEventId,
+    betas,
   } = params;
 
   await events.updatePending(pendingId, {
@@ -497,6 +510,7 @@ export async function continueTurn(params: {
     thinkingBudget,
     temperature,
     originalEventId,
+    betas,
   });
 }
 
@@ -519,6 +533,7 @@ async function handleModelResponse(params: {
   thinking: boolean | undefined;
   thinkingBudget: number | undefined;
   temperature: number | undefined;
+  betas: string[];
 }): Promise<void> {
   const {
     message,
@@ -539,6 +554,7 @@ async function handleModelResponse(params: {
     thinking,
     thinkingBudget,
     temperature,
+    betas,
   } = params;
 
   const { toolNames, toolOutputKeys } = processToolDefinitions(toolDefinitions);
@@ -634,6 +650,7 @@ async function handleModelResponse(params: {
       thinkingBudget,
       temperature,
       originalEventId,
+      betas,
     });
 
     return setTimeoutTimer(executionId, nextTurn);
@@ -662,6 +679,7 @@ export async function executeTurn(params: {
   thinking: boolean | undefined;
   thinkingBudget: number | undefined;
   temperature: number | undefined;
+  betas: string[];
 }): Promise<void> {
   const {
     executionId,
@@ -682,6 +700,7 @@ export async function executeTurn(params: {
     thinking,
     thinkingBudget,
     temperature,
+    betas,
   } = params;
 
   let retryCount = 0;
@@ -709,6 +728,7 @@ export async function executeTurn(params: {
         thinkingBudget,
         temperature,
         schema,
+        betas,
       });
 
       await syncPendingEventWithStream(pendingId, stream);
@@ -734,6 +754,7 @@ export async function executeTurn(params: {
         thinking,
         thinkingBudget,
         temperature,
+        betas,
       });
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
